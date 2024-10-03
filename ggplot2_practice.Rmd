@@ -1,0 +1,131 @@
+---
+title: "ggplot2_practice.rmd"
+author: "Wenshu chen"
+date: "2024-09-29"
+output: html_document
+---
+
+### Introduction 
+This is the final assignment for [ggplot2 course](https://www.coursera.org/learn/jhu-data-visualization-r) taught by Dr. Collin Paschall from Johns Hopkins University.  
+
+The assignment asks to make four original visualizations with required customization (color, theme, adding text, facet_wrap, etc.) using ggplot2.  
+Two datasets are provided, but students are free to use any subset of data and have to process the data as needed themselves.
+
+Original data sources:  
+[CCES data](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/WOT7O8) from the Center for Effective Lawmaking;  
+[CEL data](https://thelawmakers.org/data-download) from the Center for Effective Lawmaking. 
+
+Note that sample data used for the exercise have been modified by Dr. Paschall for teaching purpose.
+
+The following codes try to provide some meaningful information with data processing and customization. This is a course assignment though, not a serious data analysis.
+
+#### Setup and data  
+  
+```{r setup, message = FALSE, warning = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse, quietly = TRUE)
+library(ggplot2)
+library(ggthemes, quietly = TRUE)
+
+cces <- drop_na(read.csv("cces_sample_coursera.csv"))
+cel <- drop_na(read.csv("cel_volden_wiseman-_coursera.csv"))
+```
+  
+    
+#### Box plot  
+
+We look at legislative effective score for congress members by party over five congresses.  
+Members with highest score were marked.
+
+```{r box plot}
+c5 = cel[cel$congress %in% c(111, 112, 113, 114, 115), ]
+les_max = sapply(unique(cel$congress), function(x) max(cel[cel$congress==x,]$les))
+les_max_last5 = tail(sapply(les_max, function(x) cel[cel$les == x, ]$thomas_name), 5)
+label_df = data.frame(label = c(les_max_last5), 
+                      les = tail(les_max, 5))
+label_df$congress = 111:115
+ggplot(c5, aes(x = as.factor(dem), y = les)) +  
+    geom_boxplot(fill = "lightblue") +
+    facet_wrap(~factor(congress), nrow=1) + 
+    scale_x_discrete(label = c("0" = "Republican", "1" = "Democrat")) +
+    theme_bw() +
+    labs(x = "Party", y = "Legislative Effective Score",
+         title = "Legislative Effective Score by Party of Congress Members Over Five Congresses") +
+    geom_text(data = label_df, 
+              mapping = aes(x = 1.5, y = les+1, 
+              label = label, color = "#FF9999")) +
+    theme(axis.text.x = element_text(angle=45, hjust = 1),
+          legend.position = "none")
+```
+  
+#### Stacked bar plot
+
+We look at President Trump's approval with respect to people's gender and education.
+
+```{r stacked bar plot}
+ggplot(cces, aes(x = CC18_308a, fill = as.factor(gender))) +
+    geom_bar() +
+    facet_wrap(~educ, labeller = as_labeller(c("1" =  "No high school", "2" = "High school graduate", 
+                                               "3" = "Some college", "4" = "2-year college", 
+                                               "5" = "4-year college", "6" = "Post-graduate"))) +
+    labs(x = "Trump Approval", y = "Count", 
+         title = "President Trump Approval Related to Gender and Education") +
+    theme_calc() +
+    scale_x_discrete(limits = c("1"="Strontly approve", "2"="Somewhat approve", 
+                                "3"="Somewhat disapprove", "4"="Strongly disapprove"),) +
+    scale_fill_discrete(name = "Gender", 
+                        labels = c("1" = "Male", "2" = "Female")) +
+    theme(axis.text.x = element_text(angle=45, hjust = 1))
+    
+```
+  
+    
+#### Line plot
+
+We look at bill passed per congress member broken down by gender from congress 93 - 115.  
+Bill passed (all_pass) was scaled by number of respective gender members to obtain per member average.
+
+```{r line plot}
+pass_gender = aggregate(cel$all_pass, list(cel$congress, cel$female), sum)
+colnames(pass_gender) = c("Congress", "Gender", "Bill_Passed")
+pass_gender$Gender = ifelse(pass_gender$Gender==0, "Male", "Female")
+mem_count = aggregate(as.character(cel$female), list(cel$congress, cel$female), length)
+pass_gender$mem_count = mem_count$x
+pass_gender$Pass_scaled = pass_gender$Bill_Passed/pass_gender$mem_count
+
+ggplot(pass_gender, aes(x = Congress, y = Pass_scaled, group = c(Gender))) +
+    geom_line(aes(color = Gender)) + 
+    geom_point(shape = 21, fill = "white") + 
+    labs(y = "Bill Passed",
+         title = "Bill Passed by A Congress Member by Gender") +
+    theme_classic() +
+    scale_color_manual(values = c("#FF9999", "#0072B2")) +
+    scale_x_continuous(labels = as.character(pass_gender$Congress), breaks = pass_gender$Congress) + 
+    scale_y_continuous(breaks = seq(0, 3, 0.5))
+```
+  
+    
+#### Scatter plot  
+
+We look at bills passed for congress members by seniority (terms served) in congress 115. Notable members were marked.  
+
+```{r scatter plot}
+cel115 = cel[cel$congress==115,]
+longest_repub = cel115[cel115$dem==0 & cel115$seniority > 20,]$thomas_name
+short_high_repub = cel115[cel115$dem==0 & cel115$all_pass > 13,]$thomas_name
+longest_dem = cel115[cel115$dem==1 & cel115$seniority > 20,]$thomas_name
+
+ggplot(cel115, aes(x=seniority, y=all_pass, color = factor(dem))) +
+    geom_point() + 
+    theme_pander() +
+    labs(x = "Seniority (terms served)", y = "Bill Passed",
+         title = "Bill Passed by Seniority of Congress Members") +
+    scale_color_manual(values = c("red", "blue"),
+                       name = "Party", 
+                       labels = c("0" = "Republican", "1" = "Democrat")) +
+    annotate("text", x = 23, y = 8.8, label = longest_repub, color = "red") +
+    annotate("text", x = 2, y = 13.3, label = short_high_repub, color = "red") +
+    annotate("text", x = 25, y = 1.8, label = longest_dem, color = "blue")
+```
+
