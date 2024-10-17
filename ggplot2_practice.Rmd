@@ -29,7 +29,7 @@ library(ggplot2)
 library(ggthemes, quietly = TRUE)
 
 cces <- drop_na(read.csv("cces_sample_coursera.csv"))
-cel <- drop_na(read.csv("cel_volden_wiseman-_coursera.csv"))
+cel <- drop_na(read.csv("cel_volden_wiseman_coursera.csv"))
 ```
   
     
