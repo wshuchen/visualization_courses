@@ -1,0 +1,116 @@
+---
+title: "shiny_flexboard_exercise_CEL_dataset"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+runtime: shiny
+---
+
+```{r setup, message=FALSE, include=FALSE}
+library(flexdashboard)
+library(tidyverse)
+library(plotly)
+library(shiny)
+
+dat<-read_csv("cel_volden_wiseman_coursera.csv")
+dat$Party<-recode(dat$dem,`1`="Democrat",`0`="Republican")
+```
+
+Page 1
+======
+
+column
+------
+### Chart A - Bill Passed by Year and Party
+
+```{r pass_year_party, echo=FALSE, fig.cap="Figure 1. Number of bill passed since 1980 by party (democrat or republican)." }
+dat |>
+  drop_na() |>
+  filter(year>1979) |> 
+  group_by(year,Party) |> 
+  summarise(passed=sum(all_pass)) |>
+  ggplot(dat, mapping =aes(x = year, y = passed, fill = Party)) +
+    geom_area() +
+    scale_fill_manual(values = c("blue", "red")) +
+    labs(title = "Number of Bills Passed Since 1980",
+        x = "Year",
+        y = "All Bills Passed")
+```
+
+Page 2
+========
+
+column
+--------
+### Chart B - Bill Passed by Vote Percentage and Party
+
+```{r passage_votePct, echo=FALSE}
+ggplotly(
+dat |>
+  drop_na() |>
+  filter(congress==110) |>
+  ggplot(dat, mapping = aes(x = votepct, y = all_pass, color = Party)) +
+    geom_point() +
+    geom_smooth() +
+    scale_color_manual(values = c("blue", "red")) +
+    labs(title = "Passage and Vote Percentage, 110th Congress",
+        x = "Vote Percentage",
+        y = "All Bills Passed")
+)
+```
+
+column
+---------
+### Chart C - Bills Passed by DW-Nominate Score and Party
+
+```{r pass_ideology, echo=FALSE}
+ggplotly(
+dat |>
+  drop_na() |>
+  filter(congress==110) |>
+  ggplot(dat, mapping = aes(x = dwnom1, y = all_pass, color = Party)) +
+    geom_point() +
+    geom_smooth(method = "lm") +
+    scale_color_manual(values = c("blue", "red")) +
+    labs(title = "Passage and Ideology, 110th Congress",
+        x = "DW-Nominate Score (higher = more conservative)",
+        y = "All bills Passed") 
+)
+```
+
+Page 3
+========
+
+column {.sidebar} 
+-------------------
+### Chart D - Bill Passed by State Delegation
+
+```{r, echo=FALSE}
+selectInput("state", "State",
+            choices = sort(unique(dat$st_name)),
+            selected = sort(unique(dat$st_name)),
+            multiple = TRUE)
+```
+
+column {data-width=25}
+------------------
+
+column
+------------------
+
+```{r pass_state, echo=FALSE}
+renderPlot({
+dat |> 
+  group_by(st_name) |>
+  filter(congress==110) |>
+  summarise(passed=sum(all_pass)) |>
+  ggplot(dat[dat$st_name == input$state, ],
+         mapping = aes(x = passed, y = unique(st_name))) +
+         geom_bar(stat = "identity", fill="#0072B2") + 
+        ggtitle("Total Bills Passed by State Delegations, 110th Congress") +
+        xlab("Total Bills Passed Per State") +
+        ylab("State Name")
+}, width = 1050, height = 720)
+```
+
