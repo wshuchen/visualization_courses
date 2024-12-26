@@ -1,0 +1,410 @@
+---
+title: "Infectious Disease (non-COVID19) Cases in California (2001 - 2022)"
+author: "Wenshu Chen"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    horizontal_layout: fill
+    social: menu
+runtime: shiny
+resource_files:
+- CA_Counties.cpg
+- CA_Counties.dbf
+- CA_Counties.prj
+- CA_Counties.sbn
+- CA_Counties.shx
+---
+
+<style type="text/css">
+  li {font-size: 20px;}
+</style>
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+library(flexdashboard)
+library(tidyverse)
+library(plotly)
+library(shiny)
+library(sf)
+```
+
+```{r cases}
+### Disease case data
+# Source: https://data.chhs.ca.gov/dataset/infectious-disease
+data = read.csv("infectious-diseases-by-county-year-and-sex.csv")
+data= data[, 1:6]
+
+# Shorten names
+data$Disease = gsub(" \\(including Crimean-Congo, Ebola, Lassa, and Marburg viruses\\)", "", data$Disease)
+data$Disease = gsub("Creutzfeldt-Jakob Disease and other Transmissible ", "", data$Disease)
+
+# Case summary
+ca = data[data$County == "California",]
+ca$County = NULL
+ca_sex_year_case = aggregate(Cases ~ Sex + Year, ca, sum)
+ca_year_sex_population = ca[ca$Disease == "Anaplasmosis",][, c("Year", "Sex", "Population")]
+case_summary = merge(ca_year_sex_population, ca_sex_year_case, by = c("Year", "Sex"))
+case_summary$Rate = round(case_summary$Cases/case_summary$Population * 100000, 3)
+case_summary_total = case_summary[case_summary$Sex == "Total",]
+
+county = data[!data$County == "California", ]
+county_year_case = aggregate(Cases ~ Year + County, county, sum)
+county_case = aggregate(Cases ~ County, county, sum)
+
+# Merge botulism cases
+ca_total = ca[ca$Sex == "Total",][, c("Disease", "Year", "Cases", "Population")]
+botulism = ca_total[grep("Botulism", ca_total$Disease),]
+rownames(botulism) = 1:nrow(botulism)
+botulism_agg = aggregate(Cases ~ Year, botulism, sum)
+botulism_agg= cbind(Disease = botulism[1:22, "Disease"], botulism_agg, Population = botulism[1:22, "Population"])
+botulism_agg$Disease = c("Botulism")
+
+# Disease summary
+disease_summary = rbind(ca_total[-grep("Botulism", ca_total$Disease),], botulism_agg[, 1:4])
+disease_summary = disease_summary[order(disease_summary$Disease),]
+rownames(disease_summary) = 1:nrow(disease_summary)
+disease_summary$Rate = round(disease_summary$Cases/disease_summary$Population * 100000, 3)
+
+```
+
+```{r county_population}
+### County population data
+# Source:
+# https://www.census.gov/data/datasets/time-series/demo/popest/2010s-counties-total.html
+pop_data = read.csv("co-est2019-alldata.csv")
+ca_pop = pop_data[pop_data$STNAME == "California",]
+county_pop = cbind(County = ca_pop[, "CTYNAME"], 
+                      ca_pop[, grep("POPESTIMATE", colnames(ca_pop))])
+county_pop = county_pop[2:nrow(county_pop), ]
+colnames(county_pop) = gsub("POPESTIMATE", "", colnames(county_pop))
+county_pop$County = gsub(" County", "", county_pop$County)
+rownames(county_pop) = 1:nrow(county_pop)
+```
+
+```{r county_map, include=FALSE, message=FALSE, warning=FALSE}
+### County map data, needed for the centroid coordinates.
+# Source: https://data.ca.gov/dataset/ca-geographic-boundaries
+ca_sf = st_read("CA_Counties.shp") 
+ca_sf = ca_sf[, c("NAME", "geometry")]
+```
+
+
+1. Total Cases
+================================================================================
+
+column {.sidebar}
+----------------------------------
+
+<br>
+
+### <font style="font-size: 20px">**Cases and Diseases**</font>
+
+<font style="font-size: 18px">
+This dashboard explores the data of infectious disease cases from California in 2001 - 2022. [Data](https://data.chhs.ca.gov/dataset/infectious-disease) were from from California Health and Human Services Open Data Portal. COVID-19 cases were not included.  
+  
+<br>
+
+This page looks at total cases reported over 22 years with respect to pathogens and diseases. Note that some diseases have shorter epidemiological history. 
+</font>
+
+<br>
+
+```{r sidebar}
+selectInput("cases", "Number of Cases",
+            choices = c("> 1000", "100 < and <= 1000", "<= 100"),
+            selected = "> 1000",
+            multiple = FALSE)
+```
+
+column 
+-------
+
+```{r xy_theme}
+xy_theme = theme(plot.title = element_text(size = 18),
+                 plot.margin = margin(0.5, 1.5, 1, 2, "cm"),
+                 axis.text.x = element_text(size = 14),
+                 axis.text.y = element_text(size = 14),
+                 axis.title.x = element_text(size = 16, vjust = -0.5),
+                 axis.title.y = element_text(size = 16, vjust = 2.5))
+```
+
+<br>
+
+```{r case_summary}
+renderPlot({
+
+case_disease = aggregate(Cases ~ Disease, disease_summary, sum)
+case_disease = case_disease[order(-case_disease$Cases),]
+rownames(case_disease) = 1:nrow(case_disease)
+
+title = ggtitle(paste0("Total Cases (", input$cases, ") in 22 Years"))
+    
+p1 = ggplot(case_disease[case_disease$Cases > 1000, ], 
+            mapping = aes(x = fct_reorder(Disease, Cases), y=Cases)) +
+    geom_bar(stat = "identity", fill = "#0072B2") +
+    coord_flip() +
+    theme_classic() + 
+    theme(axis.title.y = element_blank()) +
+    scale_y_continuous(breaks = seq(0, 180000, 20000)) +
+    xy_theme + title
+
+p2 = ggplot(case_disease[case_disease$Cases > 100 & case_disease$Cases <= 1000, ], 
+            mapping = aes(x = fct_reorder(Disease, Cases), y=Cases)) + 
+    geom_bar(stat = "identity", fill = "#0072B2") +
+    coord_flip() +
+    theme_classic() + 
+    theme(axis.title.y = element_blank()) + 
+    scale_y_continuous(breaks = seq(0, 1000, 100)) +
+    xy_theme + title
+    
+p3 = ggplot(case_disease[case_disease$Cases <= 100, ], 
+            mapping = aes(x = fct_reorder(Disease, Cases), y=Cases)) + 
+    geom_bar(stat = "identity", fill = "#0072B2") +
+    coord_flip() +
+    theme_classic() + 
+    theme(axis.title.y = element_blank()) +
+    scale_y_continuous(limits = c(0, 100),
+                       breaks = seq(0, 100, 10)) + 
+    xy_theme + title
+
+if (input$cases == "> 1000") p1
+else if (input$cases == "100 < and <= 1000") p2
+else p3
+
+}, width = 1100, height = 750)
+
+```
+
+column {data-width=20}
+----------------------
+
+
+2. Cases, Gender, and Population
+================================================================================
+
+column {.sidebar}
+-----------------
+<br>
+<br>
+
+### <font style="font-size: 20px">**Cases and Gender**</font>
+
+<br>
+
+<font style="font-size: 18px">
+This page looks at the changes of total cases of diseases and population over time. The charts show that reported cases kept increasing in a far larger magnitude than the increase in population. The reasons need further investigation. There were more infections reported in men. Also note the disruption of COVID-19 in the reported occurrence of other infectious diseases. The phenomenon has been reported.
+</font>
+
+column
+---------
+<br>
+
+```{r case_year_population}
+renderPlot({
+
+case_2001 = case_summary[case_summary$Year == 2001 & case_summary$Sex == "Total", "Cases"]
+case_2019 = case_summary[case_summary$Year == 2019 & case_summary$Sex == "Total", "Cases"]
+increase = round((case_2019 - case_2001)/case_2001 * 100, 2)
+point_2019 = data.frame(Year = 2019, Cases = case_2019)
+ends = case_summary[case_summary$Year == 2022,]
+
+ggplot(case_summary, aes(x = Year, y = Cases)) + 
+    geom_line(aes(group = Sex)) +
+    geom_point(color = "#0072B2") + 
+    theme_classic() +
+    scale_x_continuous(limits = c(2001,2025),
+                       breaks = seq(2001, 2025, 2)) +
+    scale_y_continuous(limits = c(0, 40000),
+                       breaks = seq(0, 40000, 2500)) +
+    geom_point(point_2019,
+               mapping = aes(x = Year, y = Cases, color = "#D55E00"), size = 3) +
+    ggtitle("Disease Cases by Year") +
+    geom_text(point_2019,
+              mapping =aes(x = Year, y = Cases + 1500,
+                          label = paste(increase, "% increase over 2001"), 
+                          color = "#D55E00", size = 5)) +
+    geom_text(ends,
+              mapping = aes(x = Year + 1.5, y = Cases, label = Sex), size = 5) +
+    theme(legend.position = "none") +
+    xy_theme
+}, width = 700, height = 800)
+
+```
+
+column
+-------
+<br>
+
+```{r case_year_population2}
+renderPlot({
+  
+case_summary$Million = case_summary$Population/1000000
+pop_2001 = case_summary[case_summary$Year == 2001 & case_summary$Sex == "Total", "Million"]
+pop_2019 = case_summary[case_summary$Year == 2019 & case_summary$Sex == "Total", "Million"]
+increase = round((pop_2019 - pop_2001)/pop_2001 * 100, 2)
+point_2019 = data.frame(Year = 2019, Million = pop_2019)
+ends = case_summary[case_summary$Year == 2022,]
+
+ggplot(case_summary, aes(x = Year, y = Million)) + 
+    geom_line(aes(color = Sex)) +
+    geom_point(color = "#0072B2") + 
+    theme_classic() +
+    labs(y = "Population (Million)") +
+    scale_x_continuous(limits = c(2001,2026),
+                       breaks = seq(2001, 2026, 2)) +
+    scale_y_continuous(limits = c(10, 45),
+                       breaks = seq(10, 45, 2.5)) +
+    scale_color_manual(values = c("#D55E00", "red", "#009E73", "black")) +
+    geom_point(point_2019,
+               mapping = aes(x = Year, y = Million, color = "#D55E00"), size = 3) +
+    ggtitle("Population by Year") +
+    geom_text(point_2019,
+              mapping =aes(x = Year, y = Million + 1.5,
+                          label = paste(increase, "% increase over 2001"), 
+                          color = "#D55E00", size = 5)) +
+    geom_text(ends,
+              mapping = aes(x = Year + 2.5, y = Million, label = c(paste("Male (green)","\n", "Female (red)"), "", "Total"), size = 5)) +
+    theme(legend.position = "none") +
+    xy_theme
+
+}, width = 700, height = 800)
+```
+
+column {data-width=10}
+----------------------
+
+
+3. Change in Disease Cases
+================================================================================
+
+column
+-------
+### <font style="font-size: 20px">**Change in Individual Diseases**</font>
+
+<font style="font-size: 18px">
+Here we look at the case changes for individual diseases (with annual cases larger than 100) over the years. Some common diseases have dramatically increased reported cases, while some didn't see much changes during the two decade.  
+
+The chart is interactive. Click on the individual legends to add or remove a disease, and hover the mouse over the lines to see the actual numbers.
+</font>
+
+```{r disease_change}
+renderPlotly({
+p = ggplot(disease_summary[disease_summary$Cases >= 100,], aes(x = Year, y = Cases, color = Disease)) + 
+    geom_line() +
+    theme_classic() +
+    ggtitle("Case changes of Individual Diseases (Annual Cases >= 100) by Year (Interactive Chart)") +
+    scale_x_continuous(limits = c(2001,2022),
+                        breaks = seq(2001, 2022, 2)) +
+    scale_y_continuous(limits = c(0, 10500),
+                        breaks = seq(0, 10000, 1000)) +
+    theme(legend.text = element_text(size = 12),
+          legend.title = element_text(size = 16)) +
+    xy_theme
+
+ggplotly(p, height = 650)
+
+})
+```
+
+
+4. Cases by County and Year
+================================================================================
+
+column {.sidebar}
+-----------------
+
+### <font style="font-size: 20px">**Cases by County and Year**</font>
+
+<br>
+
+<font style="font-size: 18px">
+We look at the disease case count in each county, with total cases over the 22 years or each year of the ten years before COVID-19 pandemic. It looks like the pattern didn't changed that much in terms of case distribution in the counties.
+
+The chart is interactive. Hover the mouse over the map to see the number.
+</font>
+
+<br>
+
+```{r checkBoxGroup}
+radioButtons("year", "Year",
+                   choices = c("All", seq(2010, 2019, 1)),
+                   selected = "All")
+```
+
+column
+-------
+
+### <font style="font-size: 20px">**Cases by County (22-year Total and Annual Cases from 2010 - 2019)**</font>
+
+```{r case_map, message=FALSE, warning=FALSE}
+renderPlotly({
+  
+county_case_sf = merge(ca_sf, county_case, by.x="NAME", by.y="County")
+county_case_sf = county_case_sf[, c("NAME","geometry", "Cases")]
+
+county_pop_long = gather(county_pop, Year, Population, "2010":"2019")
+county_year_case_pop = merge(county_pop_long, county_year_case, by = c("Year", "County"))
+county_year_case_pop = county_year_case_pop[order(county_year_case_pop$Year),]
+county_ycp_sf = merge(ca_sf, county_year_case_pop, by.x = "NAME", by.y = "County")
+county_ycp_sf$K_pop = round(county_ycp_sf$Population/1000)
+county_ycp_sf = county_ycp_sf[order(county_ycp_sf$Year),]
+rownames(county_ycp_sf) = 1:nrow(county_ycp_sf)
+
+input_df = county_ycp_sf[county_ycp_sf$Year==input$year,]
+
+label_case_a = paste0(county_case_sf$NAME, "\n", county_case_sf$Cases," Cases")
+label_pop_y = paste0(input_df$NAME,"\n", input_df$Population, " People")
+label_case_y = paste0(input_df$NAME,"\n", input_df$Cases, " Cases")
+
+p_a =ggplot(st_geometry(county_case_sf)) +
+    geom_sf(color = "black", fill = "lightblue", alpha = 0.2) +
+    geom_point(st_coordinates(st_centroid(county_case_sf)), 
+               mapping = aes(x = X, y = Y, 
+                             size = county_case_sf$Cases,
+                             text = label_case_a),
+               color = "#0072B2") +
+    ggtitle("Total Cases (22 Years)") +
+    theme(plot.title = element_text(size = 20)) +
+    theme_void()
+
+p_y = ggplot(st_geometry(input_df), aes(text = label_pop_y)) +
+    geom_sf(aes(fill = input_df$K_pop), 
+            color = "black", 
+            alpha = 0.2) +
+    geom_point(st_coordinates(st_centroid(county_case_sf)), 
+               mapping = aes(x = X, y = Y, 
+                             size = input_df$Cases,
+                             text = label_case_y),
+               color = "#0072B2") +
+    labs(title = paste0("Cases from ", input$year),
+         fill = "Population\n(thousand)") +
+    theme(plot.title = element_text(size = 20)) +
+    theme_void() +
+    scale_fill_gradient(low = alpha("blue", 0.3), high = alpha("red", 0.3))
+
+if (input$year == "All") ggplotly(p_a, tooltip = "text")
+else ggplotly(p_y, tooltip = list("text", "text"))
+
+})
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
