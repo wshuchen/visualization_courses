@@ -386,25 +386,3 @@ else ggplotly(p_y, tooltip = list("text", "text"))
 
 })
 ```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
